@@ -113,7 +113,7 @@ impl EventHandler for Handler {
 
 #[tokio::main]
 async fn main() {
-    let token = env::var("DISCORD_TOKEN").expect("Expected a token in the environment");
+    let token = env::var("DISCORD_TOKEN").expect("Set DISCORD_TOKEN to authenticate to discord.");
     let http = Http::new_with_token(&token);
 
     // Set up global owners
