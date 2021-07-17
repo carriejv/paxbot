@@ -1,14 +1,21 @@
 # Exmaple search result.
 #
 # [[search_result]]
-# name = "This is the article name. Use the full, spelled-out name of the item.""
-# shortname = ["This should contain any common shorthands or abbreviations.", "Multiple, if needed."]
-# categories = ["If the result should be returned in a search for a category, put it here.", "Multiple, if needed."]
+# name = "This is the article name. Use the full, spelled-out name of the item. Results are searched by name."
+# shortname = [
+#    "This should contain any common shorthands or abbreviations.", 
+#    "Multiple, if needed.", 
+#    "These also count for searches."
+# ]
+# categories = [
+#    "If the result should be returned in a search for a category, put it here.", 
+#    "Multiple, if needed.", 
+#    "If a category is the best search result, a list of member results is returned."
+# ]
 # ext_links = ["[Google](https://google.com)", "[Example](http://example.com)"]
 # text = """ \
 # This is the body text of the article. \
 # Make sure you explain anything that could be helpful. \
-# This also gets searched for search terms, but counts a lot less than the name and shortnames. \
 # """
 
 categories = [
@@ -19,7 +26,7 @@ categories = [
 name = "Kali Liada"
 shortname = ["Kali", "Marz"]
 categories = ["Awesome People"]
-ext_links = ["[Example Link](http://example.com"]
+ext_links = ["[Example Link](http://example.com)"]
 text = """ \
 This is some text. \
 About the search result. \
@@ -30,7 +37,7 @@ Hopefully its useful. \
 name = "Nori Durnin"
 shortname = ["Nori"]
 categories = ["Awesome People"]
-ext_links = ["[Google](https://google.com"]
+ext_links = ["[Google](https://google.com)"]
 text = """ \
 This is also some text. \
 With different stuff in it. \

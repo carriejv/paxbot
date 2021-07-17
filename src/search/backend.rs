@@ -4,6 +4,7 @@
 use std::fs::read_to_string;
 
 use serde::{Deserialize,Serialize};
+use serenity::prelude::*;
 use toml;
 
 /// Full possible results fetched from the search backend.
@@ -31,6 +32,8 @@ pub struct SearchBackendItem {
     pub text: String,
 }
 
+pub struct SearchDataKey;
+
 /// Reads data from the search backend, returning a [`SearchBackendData`]
 /// containing the possible results.
 pub fn build_search_backend() -> SearchBackendData {
@@ -44,4 +47,8 @@ pub fn build_search_backend() -> SearchBackendData {
        Ok(toml_data) => toml_data,
        Err(err) => panic!("Failed to parse content.toml: {}", err) 
     }
+}
+
+impl TypeMapKey for SearchDataKey {
+    type Value = SearchBackendData;
 }

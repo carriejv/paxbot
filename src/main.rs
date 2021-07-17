@@ -42,6 +42,7 @@ use commands::util::{CmdUtil,CMDUTIL_GROUP};
 
 mod search;
 use search::{SearchResponseKey,SearchResponseMap};
+use search::backend::{SearchDataKey,build_search_backend};
 
 struct ShardManagerContainer;
 impl TypeMapKey for ShardManagerContainer {
@@ -143,10 +144,14 @@ async fn main() {
         .group(&CMDASK_GROUP)
         .group(&CMDUTIL_GROUP);
 
+    // Build search backend
+    let search_data = search::backend::build_search_backend();
+
     // Start client
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
+        .type_map_insert::<SearchDataKey>(search_data)
         .type_map_insert::<SearchResponseKey>(Arc::new(Mutex::new(SearchResponseMap::new())))
         .await
         .expect("Err creating client");
