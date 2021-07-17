@@ -24,7 +24,7 @@ use serenity::{
     },
     http::Http,
     model::{
-        channel::{Channel, Message},
+        channel::{Channel, Message, Reaction, ReactionType},
         gateway::Ready,
         id::UserId,
         permissions::Permissions,
@@ -33,8 +33,15 @@ use serenity::{
 };
 use tokio::sync::Mutex;
 
+mod consts;
+use consts::{REACT_RESULTS_BACKWARD,REACT_RESULTS_FORWARD};
+
 mod commands;
+use commands::ask::{CMDASK_GROUP};
 use commands::util::{CmdUtil,CMDUTIL_GROUP};
+
+mod search;
+use search::{SearchResponseKey,SearchResponseMap};
 
 struct ShardManagerContainer;
 impl TypeMapKey for ShardManagerContainer {
@@ -53,6 +60,54 @@ struct Handler;
 impl EventHandler for Handler {
     async fn ready(&self, _: Context, ready: Ready) {
         println!("{} is connected!", ready.user.name);
+    }
+
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        // Ignore own reactions
+        if reaction.user_id == Some(ctx.cache.current_user_id().await) {
+            return;
+        }
+        // Ignore reactions that aren't navigation.
+        let react_back = ReactionType::Unicode(String::from(REACT_RESULTS_BACKWARD));
+        let react_fwd = ReactionType::Unicode(String::from(REACT_RESULTS_FORWARD));
+        if reaction.emoji != react_back && reaction.emoji != react_fwd {
+            return;
+        }
+        // Get search cache
+        let response_data = ctx.data.write().await;
+        let mut response_map = response_data.get::<SearchResponseKey>().expect("Could not fetch search response cache.").lock().await;
+        let response_key = (reaction.channel_id, reaction.message_id);
+        // Ignore reactions to posts that don't have search cache
+        if let Some(search_response) = response_map.get_mut(&response_key) {
+            // Get a message handle
+            let mut msg = match ctx.http.get_message(*reaction.channel_id.as_u64(), *reaction.message_id.as_u64()).await {
+                Ok(msg) => msg,
+                Err(err) => { 
+                    eprintln!("Failed to get message handle for a reaction. {}", err);
+                    return
+                }
+            };
+            // Get new index. TODO: clean this mess up
+            let new_index = if reaction.emoji == react_back {
+                if search_response.index > 0 { search_response.index - 1 } else { search_response.results.len() - 1 }
+            }
+            else if reaction.emoji == react_fwd {
+                if search_response.index < search_response.results.len() - 1 { search_response.index + 1 } else { 0 }
+            }
+            else {
+                return;
+            };
+            // Render changes
+            match search_response.render_result_to_message(new_index, &ctx, &mut msg).await {
+                Ok(()) => (),
+                Err(err) => eprintln!("Failed to edit a message. {}", err)
+            };
+            // Delete navigation reactions.
+            match reaction.delete(ctx.http).await {
+                Ok(()) => (),
+                Err(err) => eprintln!("Failed to cull a reaction. {}", err)
+            };
+        }
     }
 }
 
@@ -85,12 +140,14 @@ async fn main() {
         .prefix("?")
         .delimiters(vec![",", " "])
         .owners(owners))
+        .group(&CMDASK_GROUP)
         .group(&CMDUTIL_GROUP);
 
     // Start client
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
+        .type_map_insert::<SearchResponseKey>(Arc::new(Mutex::new(SearchResponseMap::new())))
         .await
         .expect("Err creating client");
     if let Err(why) = client.start().await {
