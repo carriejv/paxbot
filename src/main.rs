@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     env,
-    fmt::Write,
     sync::Arc,
 };
 
@@ -9,20 +8,14 @@ use serenity::prelude::*;
 use serenity::{
     async_trait,
     client::bridge::gateway::{ShardId, ShardManager},
-    framework::standard::{
-        buckets::{LimitedFor, RevertBucket},
-        help_commands,
-        macros::{check, command, group, help, hook},
-        Args, CommandGroup, CommandOptions, CommandResult, DispatchError, HelpOptions, Reason, StandardFramework,
-    },
+    framework::standard:: StandardFramework,
     http::Http,
     model::{
-        channel::{Channel, Message, Reaction, ReactionType},
+        channel::{Message, Reaction, ReactionType},
         gateway::Ready,
-        id::UserId,
+        id::{ChannelId, MessageId},
         permissions::Permissions,
-    },
-    utils::{content_safe, ContentSafeOptions},
+    }
 };
 use tokio::sync::Mutex;
 
@@ -31,11 +24,10 @@ use consts::{REACT_RESULTS_BACKWARD, REACT_RESULTS_FORWARD};
 
 mod commands;
 use commands::ask::CMDASK_GROUP;
-use commands::util::{CmdUtil, CMDUTIL_GROUP};
+use commands::util::CMDUTIL_GROUP;
 
 mod search;
 use search::backend::{build_search_backend, SearchDataKey};
-use search::{SearchResponseKey, SearchResponseMap};
 
 struct ShardManagerContainer;
 impl TypeMapKey for ShardManagerContainer {
@@ -70,13 +62,13 @@ impl EventHandler for Handler {
         // Get search cache
         let response_data = ctx.data.write().await;
         let mut response_map = response_data
-            .get::<SearchResponseKey>()
-            .expect("Could not fetch search response cache.")
+            .get::<RenderableResponseKey>()
+            .expect("Could not fetch renderable response map.")
             .lock()
             .await;
         let response_key = (reaction.channel_id, reaction.message_id);
         // Ignore reactions to posts that don't have search cache
-        if let Some(search_response) = response_map.get_mut(&response_key) {
+        if let Some(render_response) = response_map.get_mut(&response_key) {
             // Get a message handle
             let mut msg = match ctx
                 .http
@@ -91,14 +83,14 @@ impl EventHandler for Handler {
             };
             // Get new index. TODO: clean this mess up
             let new_index = if reaction.emoji == react_back {
-                if search_response.index > 0 {
-                    search_response.index - 1
+                if render_response.index > 0 {
+                    render_response.index - 1
                 } else {
-                    search_response.results.len() - 1
+                    render_response.messages.len() - 1
                 }
             } else if reaction.emoji == react_fwd {
-                if search_response.index < search_response.results.len() - 1 {
-                    search_response.index + 1
+                if render_response.index < render_response.messages.len() - 1 {
+                    render_response.index + 1
                 } else {
                     0
                 }
@@ -106,10 +98,7 @@ impl EventHandler for Handler {
                 return;
             };
             // Render changes
-            match search_response
-                .render_result_to_message(new_index, &ctx, &mut msg)
-                .await
-            {
+            match render_response.render(new_index, &ctx, &mut msg).await {
                 Ok(()) => (),
                 Err(err) => eprintln!("Failed to edit a message. {}", err),
             };
@@ -120,6 +109,74 @@ impl EventHandler for Handler {
             };
         }
     }
+}
+
+/// Defines data that can be rendered to an embed message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderableEmbed {
+    /// Embed description
+    pub description: Option<String>,
+    /// Fields as (title, content, inline) tuples
+    pub fields: Option<Vec<(String, String, bool)>>,
+    /// Embed footer
+    pub footer: Option<String>,
+    /// Embed title
+    pub title: String,
+}
+
+/// Defines data that can be rendered to a message.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderableMessage {
+    /// Message content.
+    pub content: String,
+    /// Embed content.
+    pub embed: Option<RenderableEmbed>,
+}
+
+/// Contains an entire renderable response that can be navigated through.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RenderableResponse {
+    /// Currently rendered index.
+    index: usize,
+    /// Vec of [`RenderableMessage`]s.
+    messages: Vec<RenderableMessage>,
+}
+
+impl RenderableResponse {
+    /// Edits an existing message, displaying the [`RenderableMessage`] from [`self.messages`] at a specific index in it.
+    pub async fn render(&mut self, index: usize, ctx: &Context, msg: &mut Message) -> Result<(), serenity::Error> {
+        let message = &self.messages[index];
+        msg.edit(&ctx.http, |m| {
+            m.content(&message.content);
+            if let Some(embed) = &message.embed {
+                m.embed(|e| {
+                    e.title(&embed.title);
+                    if let Some(desc) = &embed.description {
+                        e.description(desc);
+                    }
+                    if let Some(fields) = embed.fields.clone() {
+                        e.fields(fields);
+                    }
+                    if let Some(footer_text) = &embed.footer {
+                        e.footer(|f| f.text(footer_text));
+                    }
+                    e
+                });
+            }
+            m
+        })
+        .await?;
+        self.index = index;
+        Ok(())
+    }
+}
+
+pub struct RenderableResponseKey;
+
+pub type RenderableResponseMap = HashMap<(ChannelId, MessageId), RenderableResponse>;
+
+impl TypeMapKey for RenderableResponseKey {
+    type Value = Arc<Mutex<RenderableResponseMap>>;
 }
 
 #[tokio::main]
@@ -157,14 +214,14 @@ async fn main() {
         .group(&CMDUTIL_GROUP);
 
     // Build search backend
-    let search_data = search::backend::build_search_backend();
+    let search_data = build_search_backend();
 
     // Start client
     let mut client = Client::builder(&token)
         .event_handler(Handler)
         .framework(framework)
         .type_map_insert::<SearchDataKey>(search_data)
-        .type_map_insert::<SearchResponseKey>(Arc::new(Mutex::new(SearchResponseMap::new())))
+        .type_map_insert::<RenderableResponseKey>(Arc::new(Mutex::new(RenderableResponseMap::new())))
         .await
         .expect("Err creating client");
     if let Err(why) = client.start().await {

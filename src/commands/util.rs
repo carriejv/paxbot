@@ -4,12 +4,7 @@ use serenity::{
         macros::{command, group},
         Args, CommandGroup, CommandOptions, CommandResult,
     },
-    model::{
-        channel::{Channel, Message},
-        gateway::Ready,
-        id::UserId,
-        permissions::Permissions,
-    },
+    model::channel::Message,
 };
 
 /// Container for non-admin-restricted utility commands.

@@ -1,23 +1,15 @@
-use std::cmp::Ordering;
-
 use serenity::prelude::*;
 use serenity::{
     framework::standard::{
         macros::{command, group},
-        Args, CommandGroup, CommandOptions, CommandResult,
+        Args, CommandResult,
     },
-    model::{
-        channel::{Channel, Message, ReactionType},
-        gateway::Ready,
-        id::UserId,
-        permissions::Permissions,
-    },
+    model::channel::{Message, ReactionType},
 };
 
 use crate::consts::*;
-use crate::search::{
-    backend::SearchDataKey, search, RenderType, SearchResponse, SearchResponseKey, SearchResponseMap, SearchResult,
-};
+use crate::search::{backend::SearchDataKey, search, RenderType};
+use crate::RenderableResponseKey;
 
 /// Container for the primary query command.
 #[group]
@@ -27,14 +19,14 @@ pub struct CmdAsk;
 #[command("pax")] // This results in ?pax being read as the command, with the rest being args
 async fn ask(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let search_query = args.rest();
-    if search_query == "" {
+    if search_query.is_empty() {
         msg.channel_id.say(&ctx.http, "Usage: `?pax your search here`").await?;
         return Ok(());
     }
     // Post result container --- this will get edited when response arrives.
     let reply_msg = msg.channel_id.say(&ctx.http, "Searching...").await?;
     // Do a search
-    let mut search_response = {
+    let search_response = {
         let ctx_data = ctx.data.read().await;
         let search_data_ref = ctx_data.get::<SearchDataKey>().expect("Search data missing.");
         search(&search_query, search_data_ref).await
@@ -44,52 +36,38 @@ async fn ask(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         .http
         .get_message(*reply_msg.channel_id.as_u64(), *reply_msg.id.as_u64())
         .await?;
+    // Render result
+    let mut render_response = search_response.get_renderable_response();
+    render_response.render(0, &ctx, &mut editable_msg).await?;
+    // Set up navigation reactions
+    if render_response.messages.len() > 1 {
+        reply_msg
+            .react(&ctx.http, ReactionType::Unicode(String::from(REACT_RESULTS_BACKWARD)))
+            .await?;
+        reply_msg
+            .react(&ctx.http, ReactionType::Unicode(String::from(REACT_RESULTS_FORWARD)))
+            .await?;
+    }
+    // Set up feedback reactions
     match search_response.render_type {
-        RenderType::Category => println!("TODO"),
-        RenderType::Guess(guessed_name) => {
-            editable_msg.suppress_embeds(&ctx.http).await?;
-            match guessed_name {
-                Some(best_guess) => {
-                    editable_msg
-                        .edit(&ctx.http, |m| {
-                            m.content(format!("No results found. Did you mean `{}`?", best_guess))
-                        })
-                        .await?
-                }
-                None => editable_msg.edit(&ctx.http, |m| m.content("No results found.")).await?,
-            };
-        }
-        RenderType::Result => {
-            if search_response.results.len() > 1 {
-                // Set up navigation reactions
-                reply_msg
-                    .react(&ctx.http, ReactionType::Unicode(String::from(REACT_RESULTS_BACKWARD)))
-                    .await?;
-                reply_msg
-                    .react(&ctx.http, ReactionType::Unicode(String::from(REACT_RESULTS_FORWARD)))
-                    .await?;
-            }
-            // Render result
-            search_response
-                .render_result_to_message(0, &ctx, &mut editable_msg)
-                .await?;
-            // Set up feedback reactions
+        RenderType::Category | RenderType::Result => {
             reply_msg
                 .react(&ctx.http, ReactionType::Unicode(String::from(REACT_FEEDBACK_GOOD)))
                 .await?;
             reply_msg
                 .react(&ctx.http, ReactionType::Unicode(String::from(REACT_FEEDBACK_BAD)))
                 .await?;
-            // Write context data
-            let mut ctx_data = ctx.data.write().await;
-            let resp_map = ctx_data
-                .get_mut::<SearchResponseKey>()
-                .expect("Failed to get search response map.");
-            resp_map
-                .lock()
-                .await
-                .insert((reply_msg.channel_id, reply_msg.id), search_response);
         }
+        _ => (),
     }
+    // Write context data
+    let mut ctx_data = ctx.data.write().await;
+    let resp_map = ctx_data
+        .get_mut::<RenderableResponseKey>()
+        .expect("Failed to get render response map.");
+    resp_map
+        .lock()
+        .await
+        .insert((reply_msg.channel_id, reply_msg.id), render_response);
     Ok(())
 }
