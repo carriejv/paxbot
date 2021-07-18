@@ -18,14 +18,17 @@
 # Make sure you explain anything that could be helpful. \
 # """
 
-categories = [
-    "Awesome Peoople"
-]
+[[category]]
+name = "Awesome Person"
+text = """ \
+Awesome people are awesome. \
+Yup. \
+"""
 
 [[search_result]]
 name = "Kali Liada"
 shortname = ["Kali", "Marz"]
-categories = ["Awesome People"]
+categories = ["Awesome Person"]
 ext_links = ["[Example Link](http://example.com)"]
 text = """ \
 This is some text. \
@@ -36,7 +39,7 @@ Hopefully its useful. \
 [[search_result]]
 name = "Nori Durnin"
 shortname = ["Nori"]
-categories = ["Awesome People"]
+categories = ["Awesome Person"]
 ext_links = ["[Google](https://google.com)"]
 text = """ \
 This is also some text. \

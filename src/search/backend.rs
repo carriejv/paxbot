@@ -3,7 +3,7 @@
 
 use std::fs::read_to_string;
 
-use serde::{Deserialize,Serialize};
+use serde::{Deserialize, Serialize};
 use serenity::prelude::*;
 use toml;
 
@@ -11,10 +11,20 @@ use toml;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SearchBackendData {
     /// Vec of all categories
-    pub categories: Vec<String>,
+    #[serde(rename = "category")]
+    pub categories: Vec<SearchBackendCategory>,
     #[serde(rename = "search_result")]
     /// Vec of all search results
     pub search_results: Vec<SearchBackendItem>,
+}
+
+/// Category fetched from the search backend.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct SearchBackendCategory {
+    /// Category name
+    pub name: String,
+    /// Category description
+    pub text: String,
 }
 
 /// Item fetched from the search backend.
@@ -44,8 +54,8 @@ pub fn build_search_backend() -> SearchBackendData {
         }
     };
     match toml::from_str::<SearchBackendData>(&file_data) {
-       Ok(toml_data) => toml_data,
-       Err(err) => panic!("Failed to parse content.toml: {}", err) 
+        Ok(toml_data) => toml_data,
+        Err(err) => panic!("Failed to parse content.toml: {}", err),
     }
 }
 

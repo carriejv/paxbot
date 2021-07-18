@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use rust_fuzzy_search::fuzzy_compare;
-use serenity::prelude::*;
 use serenity::model::channel::Message;
 use serenity::model::id::{ChannelId, MessageId};
+use serenity::prelude::*;
 use tokio::sync::Mutex;
 
 use crate::consts::*;
@@ -14,14 +14,13 @@ use backend::SearchBackendData;
 
 /// Best guess from a search.
 #[derive(Clone, Debug, PartialEq)]
-pub enum BestGuess {
-    /// Highest score was a category.
+pub enum RenderType {
+    /// Render category results
     Category,
-    /// No single item exceeded threshold. This is the best guess of a category or article name, if any.
-    Name(Option<String>),
-    /// Highest score was a search result.
+    /// Render a best guess string.
+    Guess(Option<String>),
+    /// Render item results.
     Result,
-
 }
 
 /// Search result for a category
@@ -32,7 +31,9 @@ pub struct CategoryResult {
     /// Category name
     pub name: String,
     /// Relevance score
-    pub score: f32
+    pub score: f32,
+    /// Text description of the category.
+    pub text: String,
 }
 
 /// Search result struct
@@ -55,14 +56,14 @@ pub struct SearchResult {
 /// Search response (containing all relevant results).
 #[derive(Clone, Debug)]
 pub struct SearchResponse {
-    /// The best guess result 
-    pub best_guess: BestGuess,
     /// Category results, sorted by score
     pub category_results: Vec<CategoryResult>,
     /// Currently rendered result index
     pub index: usize,
     /// The original query
     pub query: String,
+    /// The render_type currently in use.
+    pub render_type: RenderType,
     /// Vec of search results for a query, sorted by score
     pub results: Vec<SearchResult>,
 }
@@ -76,8 +77,42 @@ impl TypeMapKey for SearchResponseKey {
 }
 
 impl SearchResponse {
+    /// Edits a message, displaying a category result from a search response in it.
+    pub async fn render_category_to_message(
+        &mut self, index: usize, ctx: &Context, msg: &mut Message,
+    ) -> Result<(), serenity::Error> {
+        let result = &self.category_results[index];
+        let mut item_list = &result.members.iter().cloned().take(10).collect::<Vec<String>>().join("\n");
+        if result.members.len() > 10 {
+            item_list.push_str(format!("\n...and {} more.", result.members.len() - 10));
+        }
+        msg.edit(&ctx.http, |m| {
+            m.content(format!("Results for: `{}`", self.query));
+            m.embed(|e| {
+                e.title(format!("{} (Category)", &result.name));
+                e.description(&result.text);
+                e.fields(vec![
+                    ("Category Members", &item_list, true),
+                ]);
+                let footer_text = if self.category_results.len() + self.results.len() > 1 {
+                    format!("Displaying result {} of {}. Use {} and {} to navigate.\nUse {} if paxbot found what you needed or {} if not.", index + 1, self.results.len(), REACT_RESULTS_BACKWARD, REACT_RESULTS_FORWARD, REACT_FEEDBACK_GOOD, REACT_FEEDBACK_BAD)
+                }
+                else {
+                    format!("Use {} if paxbot found what you needed or {} if not.", REACT_FEEDBACK_GOOD, REACT_FEEDBACK_BAD)
+                };
+                e.footer(|f| f.text(footer_text));
+                e
+            });
+            m
+        }).await?;
+        self.index = index;
+        Ok(())
+    }
+
     /// Edits a message, displaying a search result from a search response in it.
-    pub async fn render_result_to_message(&mut self, index: usize, ctx: &Context, msg: &mut Message) -> Result<(), serenity::Error> {
+    pub async fn render_result_to_message(
+        &mut self, index: usize, ctx: &Context, msg: &mut Message,
+    ) -> Result<(), serenity::Error> {
         let result = &self.results[index];
         msg.edit(&ctx.http, |m| {
             m.content(format!("Results for: `{}`", self.query));
@@ -110,30 +145,35 @@ impl SearchResponse {
 /// Performs a search on a given [`SearchBackendData`].
 pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchResponse {
     let mut search_response = SearchResponse {
-        best_guess: BestGuess::Name(None),
         category_results: Vec::<CategoryResult>::new(),
         index: 0,
         query: String::from(query),
-        results: Vec::<SearchResult>::new()
+        render_type: RenderType::Guess(None),
+        results: Vec::<SearchResult>::new(),
     };
     let mut best_score = 0f32;
     // Search categories
     for category_item in &from_data.categories {
-        let category_score = fuzzy_compare(&category_item.to_lowercase(), &query.to_lowercase());
+        let category_score = fuzzy_compare(&category_item.name.to_lowercase(), &query.to_lowercase());
         if category_score > SEARCH_SCORE_THRESHOLD {
             search_response.category_results.push(CategoryResult {
-                members: from_data.search_results.iter().filter(|x| x.categories.contains(&category_item)).map(|x| x.name.clone()).collect::<Vec<String>>(),
-                name: category_item.clone(),
-                score: category_score
+                members: from_data
+                    .search_results
+                    .iter()
+                    .filter(|x| x.categories.contains(&category_item.name))
+                    .map(|x| x.name.clone())
+                    .collect::<Vec<String>>(),
+                name: category_item.name.clone(),
+                score: category_score,
+                text: category_item.text.clone()
             });
             if category_score > best_score {
-                search_response.best_guess = BestGuess::Category;
+                search_response.render_type = RenderType::Category;
                 best_score = category_score;
             }
-        }
-        else {
+        } else {
             if category_score > best_score {
-                search_response.best_guess = BestGuess::Name(Some(category_item.clone()));
+                search_response.render_type = RenderType::Guess(Some(category_item.name.clone()));
                 best_score = category_score;
             }
         }
@@ -158,27 +198,30 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
                 name: search_item.name.clone(),
                 score: item_score,
                 shortname: search_item.shortname.clone(),
-                text: search_item.text.clone()
+                text: search_item.text.clone(),
             });
             if item_score > best_score {
-                search_response.best_guess = BestGuess::Result;
+                search_response.render_type = RenderType::Result;
                 best_score = item_score;
             }
-        }
-        else {
+        } else {
             if item_score > best_score {
-                search_response.best_guess = BestGuess::Name(Some(search_item.name.clone()));
+                search_response.render_type = RenderType::Guess(Some(search_item.name.clone()));
                 best_score = item_score;
             }
         }
     }
-    search_response.category_results.sort_by(|a, b| match b.score.partial_cmp(&a.score){
-        Some(score_cmp) => score_cmp,
-        None => b.name.cmp(&a.name)
-    });
-    search_response.results.sort_by(|a, b| match b.score.partial_cmp(&a.score){
-        Some(score_cmp) => score_cmp,
-        None => b.name.cmp(&a.name)
-    });
+    search_response
+        .category_results
+        .sort_by(|a, b| match b.score.partial_cmp(&a.score) {
+            Some(score_cmp) => score_cmp,
+            None => b.name.cmp(&a.name),
+        });
+    search_response
+        .results
+        .sort_by(|a, b| match b.score.partial_cmp(&a.score) {
+            Some(score_cmp) => score_cmp,
+            None => b.name.cmp(&a.name),
+        });
     search_response
 }

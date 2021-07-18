@@ -13,14 +13,7 @@ use serenity::{
         buckets::{LimitedFor, RevertBucket},
         help_commands,
         macros::{check, command, group, help, hook},
-        Args,
-        CommandGroup,
-        CommandOptions,
-        CommandResult,
-        DispatchError,
-        HelpOptions,
-        Reason,
-        StandardFramework,
+        Args, CommandGroup, CommandOptions, CommandResult, DispatchError, HelpOptions, Reason, StandardFramework,
     },
     http::Http,
     model::{
@@ -34,15 +27,15 @@ use serenity::{
 use tokio::sync::Mutex;
 
 mod consts;
-use consts::{REACT_RESULTS_BACKWARD,REACT_RESULTS_FORWARD};
+use consts::{REACT_RESULTS_BACKWARD, REACT_RESULTS_FORWARD};
 
 mod commands;
-use commands::ask::{CMDASK_GROUP};
-use commands::util::{CmdUtil,CMDUTIL_GROUP};
+use commands::ask::CMDASK_GROUP;
+use commands::util::{CmdUtil, CMDUTIL_GROUP};
 
 mod search;
-use search::{SearchResponseKey,SearchResponseMap};
-use search::backend::{SearchDataKey,build_search_backend};
+use search::backend::{build_search_backend, SearchDataKey};
+use search::{SearchResponseKey, SearchResponseMap};
 
 struct ShardManagerContainer;
 impl TypeMapKey for ShardManagerContainer {
@@ -76,37 +69,54 @@ impl EventHandler for Handler {
         }
         // Get search cache
         let response_data = ctx.data.write().await;
-        let mut response_map = response_data.get::<SearchResponseKey>().expect("Could not fetch search response cache.").lock().await;
+        let mut response_map = response_data
+            .get::<SearchResponseKey>()
+            .expect("Could not fetch search response cache.")
+            .lock()
+            .await;
         let response_key = (reaction.channel_id, reaction.message_id);
         // Ignore reactions to posts that don't have search cache
         if let Some(search_response) = response_map.get_mut(&response_key) {
             // Get a message handle
-            let mut msg = match ctx.http.get_message(*reaction.channel_id.as_u64(), *reaction.message_id.as_u64()).await {
+            let mut msg = match ctx
+                .http
+                .get_message(*reaction.channel_id.as_u64(), *reaction.message_id.as_u64())
+                .await
+            {
                 Ok(msg) => msg,
-                Err(err) => { 
+                Err(err) => {
                     eprintln!("Failed to get message handle for a reaction. {}", err);
-                    return
+                    return;
                 }
             };
             // Get new index. TODO: clean this mess up
             let new_index = if reaction.emoji == react_back {
-                if search_response.index > 0 { search_response.index - 1 } else { search_response.results.len() - 1 }
-            }
-            else if reaction.emoji == react_fwd {
-                if search_response.index < search_response.results.len() - 1 { search_response.index + 1 } else { 0 }
-            }
-            else {
+                if search_response.index > 0 {
+                    search_response.index - 1
+                } else {
+                    search_response.results.len() - 1
+                }
+            } else if reaction.emoji == react_fwd {
+                if search_response.index < search_response.results.len() - 1 {
+                    search_response.index + 1
+                } else {
+                    0
+                }
+            } else {
                 return;
             };
             // Render changes
-            match search_response.render_result_to_message(new_index, &ctx, &mut msg).await {
+            match search_response
+                .render_result_to_message(new_index, &ctx, &mut msg)
+                .await
+            {
                 Ok(()) => (),
-                Err(err) => eprintln!("Failed to edit a message. {}", err)
+                Err(err) => eprintln!("Failed to edit a message. {}", err),
             };
             // Delete navigation reactions.
             match reaction.delete(ctx.http).await {
                 Ok(()) => (),
-                Err(err) => eprintln!("Failed to cull a reaction. {}", err)
+                Err(err) => eprintln!("Failed to cull a reaction. {}", err),
             };
         }
     }
@@ -130,17 +140,19 @@ async fn main() {
                 Ok(bot_id) => (owners, bot_id.id),
                 Err(why) => panic!("Could not access the bot id: {:?}", why),
             }
-        },
+        }
         Err(why) => panic!("Could not access application info: {:?}", why),
     };
 
     // Build command framework
-    let framework = StandardFramework::new().configure(|c| c
-        .with_whitespace(true)
-        .on_mention(Some(bot_id))
-        .prefix("?")
-        .delimiters(vec![",", " "])
-        .owners(owners))
+    let framework = StandardFramework::new()
+        .configure(|c| {
+            c.with_whitespace(true)
+                .on_mention(Some(bot_id))
+                .prefix("?")
+                .delimiters(vec![",", " "])
+                .owners(owners)
+        })
         .group(&CMDASK_GROUP)
         .group(&CMDUTIL_GROUP);
 
