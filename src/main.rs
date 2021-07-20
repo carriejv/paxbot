@@ -224,7 +224,8 @@ async fn main() {
         .type_map_insert::<RenderableResponseKey>(Arc::new(Mutex::new(RenderableResponseMap::new())))
         .await
         .expect("Err creating client");
-    if let Err(why) = client.start().await {
+    if let Err(why) = client.start_autosharded().await {
         println!("Client error: {:?}", why);
     }
+
 }

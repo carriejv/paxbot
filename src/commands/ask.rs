@@ -7,6 +7,7 @@ use serenity::{
     model::channel::{Message, ReactionType},
 };
 
+use crate::commands::util::print_help;
 use crate::consts::*;
 use crate::search::{backend::SearchDataKey, search, RenderType};
 use crate::RenderableResponseKey;
@@ -20,8 +21,7 @@ pub struct CmdAsk;
 async fn ask(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let search_query = args.rest();
     if search_query.is_empty() {
-        msg.channel_id.say(&ctx.http, "Usage: `?pax your search here`").await?;
-        return Ok(());
+        return print_help(&ctx, &msg).await
     }
     // Post result container --- this will get edited when response arrives.
     let reply_msg = msg.channel_id.say(&ctx.http, "Searching...").await?;

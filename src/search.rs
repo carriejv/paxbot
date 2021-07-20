@@ -112,7 +112,7 @@ impl SearchResponse {
                 }
                 None => {
                     messages = vec![RenderableMessage {
-                        content: "No results found".to_string(),
+                        content: "No results found.".to_string(),
                         embed: None,
                     }]
                 }
@@ -195,6 +195,7 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
     // Search categories
     for category_item in &from_data.categories {
         let category_score = fuzzy_compare(&category_item.name.to_lowercase(), &query.to_lowercase());
+        println!("Score: {} -- {} w/ {}", category_score, category_item.name, query); // TODO: Remove
         if category_score > SEARCH_SCORE_THRESHOLD {
             search_response.category_results.push(CategoryResult {
                 members: from_data
@@ -211,7 +212,7 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
                 search_response.render_type = RenderType::Category;
                 best_score = category_score;
             }
-        } else if category_score > best_score {
+        } else if category_score > best_score && category_score > SEARCH_SUGGEST_THRESHOLD {
             search_response.render_type = RenderType::Guess(Some(category_item.name.clone()));
             best_score = category_score;
         }
@@ -224,6 +225,7 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
         names.push(search_item.name.as_str());
         for name in names {
             let name_score = fuzzy_compare(&name.to_lowercase(), &query.to_lowercase());
+            println!("Score: {} -- {} w/ {}", name_score, name, query); // TODO: Remove
             if name_score > item_score {
                 item_score = name_score;
             }
@@ -242,7 +244,7 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
                 search_response.render_type = RenderType::Result;
                 best_score = item_score;
             }
-        } else if item_score > best_score {
+        } else if item_score > best_score && item_score > SEARCH_SUGGEST_THRESHOLD {
             search_response.render_type = RenderType::Guess(Some(search_item.name.clone()));
             best_score = item_score;
         }
@@ -259,5 +261,6 @@ pub async fn search(query: &str, from_data: &SearchBackendData) -> SearchRespons
             Some(score_cmp) => score_cmp,
             None => b.name.cmp(&a.name),
         });
+    println!("{:?}", search_response); // TODO: Remove
     search_response
 }
